@@ -14,6 +14,7 @@
 
 ## 🌟 Features
 
+- 💡 **Simple & Risk-Free**: No complicated setups or black-box hooks that trip risk detections. Just clean, transparent local file management.
 - 🔒 **Zero Credential Pollution**: Strictly separates "switching existing accounts" from "binding new accounts (`save`)", eliminating the critical flaw where logging into a new session silently overwrites the previous account's backup.
 - 🛡️ **Production-Grade Security**: Enforces `umask 077` (read/write only by the current user) on all credential backups and tag files, preventing multi-user privilege leakage.
 - ⚡ **Atomic Replacement**: Utilizes `.tmp` staging + `mv` atomic replacement within the same filesystem, ensuring zero file corruption during power failures or sudden process termination.
