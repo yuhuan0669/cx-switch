@@ -1,0 +1,239 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# cx-switch: Safe, Seamless Multi-Account Switcher for Codex CLI & Desktop
+# Repository: https://github.com/yuhuan0669/cx-switch
+# License: MIT
+# ==============================================================================
+
+CX_VERSION="1.0.0"
+
+cx-switch() {
+  local dir="${CODEX_HOME:-$HOME/.codex}"
+  local current_tag="$dir/.current_acc"
+  local auth="$dir/auth.json"
+  local force=0
+  local args=()
+  for arg in "$@"; do
+    if [[ "$arg" == "-f" || "$arg" == "--force" ]]; then
+      force=1
+    else
+      args+=("$arg")
+    fi
+  done
+
+  local action="${args[0]}"
+
+  # 1. 确保配置目录存在
+  if [[ ! -d "$dir" ]]; then
+    mkdir -p "$dir" 2>/dev/null || {
+      echo "错误: 无法创建或访问 Codex 配置目录: $dir"
+      return 1
+    }
+  fi
+
+  local prev=""
+  if [[ -f "$current_tag" ]]; then
+    read -r prev < "$current_tag" 2>/dev/null
+  fi
+
+  # 2. 版本查看
+  if [[ "$action" == "-v" || "$action" == "--version" ]]; then
+    echo "cx-switch v$CX_VERSION"
+    return 0
+  fi
+
+  # 3. 帮助与状态展示（无参数、-h、--help、list、ls、status）
+  if [[ -z "$action" || "$action" == "-h" || "$action" == "--help" || "$action" == "list" || "$action" == "ls" || "$action" == "status" ]]; then
+    echo "=== Codex 账号管理 (cx-switch v$CX_VERSION) ==="
+    echo "当前激活账号: ${prev:-[未标记 / 未知]}"
+    echo ""
+    echo "已保存的账号备份:"
+
+    local found=0
+    local restore_nullglob=""
+    if [[ -n "$ZSH_VERSION" ]]; then
+      setopt local_options null_glob
+    elif [[ -n "$BASH_VERSION" ]]; then
+      shopt -q nullglob || restore_nullglob="yes"
+      shopt -s nullglob
+    fi
+    local files=("$dir"/auth.*.json)
+    [[ -n "$restore_nullglob" ]] && shopt -u nullglob
+
+    for f in "${files[@]}"; do
+      [[ -e "$f" ]] || continue
+      local acc_name="${f#$dir/auth.}"
+      acc_name="${acc_name%.json}"
+      if [[ "$acc_name" == "$prev" ]]; then
+        echo "  * $acc_name (当前激活)"
+      else
+        echo "    $acc_name"
+      fi
+      found=1
+    done
+
+    [[ $found -eq 0 ]] && echo "  (暂无账号备份)"
+
+    echo ""
+    echo "常用指令:"
+    echo "  cx-switch <账号名>          切换到指定账号 (若已在当前账号则自动同步刷新凭据)"
+    echo "  cx-switch save <账号名>     将当前活跃登录凭据另存/绑定为指定账号"
+    echo "  cx-switch new               安全封存当前账号并清空凭据，以便启动 Codex 登录新账号"
+    echo "  cx-switch rm <账号名>       删除指定的账号备份"
+    echo "  cx-switch status            查看当前账号与所有备份状态"
+    return 0
+  fi
+
+  # 4. 子命令：清空当前凭据准备登录新账号 (cx-switch new)
+  if [[ "$action" == "new" ]]; then
+    if pgrep -ix "codex" >/dev/null 2>&1; then
+      if [[ $force -eq 1 ]]; then
+        echo "警告: 检测到 Codex 正在运行，已通过 --force 强制执行"
+      else
+        echo "错误: 检测到 Codex 正在运行！请先彻底关闭 Codex (CLI / Desktop) 后再操作 (或使用 -f / --force 强制执行)。"
+        return 1
+      fi
+    fi
+
+    # 若当前有活跃有效凭据，先安全归档
+    if [[ -n "$prev" && -f "$auth" ]] && grep -qE '"(access_token|refresh_token|api_key|session_token)"' "$auth" 2>/dev/null; then
+      if (umask 077 && cp "$auth" "$dir/auth.${prev}.json.tmp" && mv "$dir/auth.${prev}.json.tmp" "$dir/auth.${prev}.json"); then
+        echo "已自动保存 [$prev] 的最新凭据备份"
+      fi
+    fi
+
+    rm -f "$auth" "$current_tag"
+    echo "已成功清除当前登录态槽位。"
+    echo "提示: 现在可以启动 Codex 登录新账号，完成登录后执行: cx-switch save <新账号名>"
+    return 0
+  fi
+
+  # 5. 子命令：显式绑定/另存当前凭据 (cx-switch save <name>)
+  if [[ "$action" == "save" ]]; then
+    local save_name="${args[1]}"
+    if [[ -z "$save_name" ]]; then
+      echo "错误: 请指定要保存的账号名称。例如: cx-switch save work"
+      return 1
+    fi
+    if [[ ! "$save_name" =~ ^[a-zA-Z0-9_-]+$ ]] || [[ "$save_name" =~ ^(tmp|save|new|rm|delete|ls|list|status)$ ]]; then
+      echo "错误: 账号名只能包含英文字母、数字、下划线和连字符，且不能使用系统保留字"
+      return 1
+    fi
+
+    if [[ ! -f "$auth" ]] || ! grep -qE '"(access_token|refresh_token|api_key|session_token)"' "$auth" 2>/dev/null; then
+      echo "错误: 当前 auth.json 不存在或未处于有效登录状态，无法保存"
+      return 1
+    fi
+
+    if ! (umask 077 && cp "$auth" "$dir/auth.${save_name}.json.tmp" && mv "$dir/auth.${save_name}.json.tmp" "$dir/auth.${save_name}.json"); then
+      echo "错误: 写入凭据备份失败"
+      return 1
+    fi
+
+    (umask 077 && echo "$save_name" > "$current_tag.tmp" && mv "$current_tag.tmp" "$current_tag")
+    echo "已将当前登录凭据成功保存为 [$save_name]，并标记为当前激活账号"
+    return 0
+  fi
+
+  # 6. 子命令：删除账号备份 (cx-switch rm <name> / cx-switch delete <name>)
+  if [[ "$action" == "rm" || "$action" == "delete" ]]; then
+    local del_name="${args[1]}"
+    if [[ -z "$del_name" ]]; then
+      echo "错误: 请指定要删除的账号名称。例如: cx-switch rm test_acc"
+      return 1
+    fi
+    local del_auth="$dir/auth.${del_name}.json"
+    if [[ ! -f "$del_auth" ]]; then
+      echo "错误: 未找到账号 [$del_name] 的备份文件"
+      return 1
+    fi
+
+    rm -f "$del_auth"
+    echo "已删除账号 [$del_name] 的备份文件"
+    if [[ "$del_name" == "$prev" ]]; then
+      rm -f "$current_tag"
+      echo "提示: 被删除的账号是当前激活账号，已重置激活状态标记"
+    fi
+    return 0
+  fi
+
+  # 7. 账号切换逻辑 (cx-switch <target>)
+  local target="$action"
+
+  # 校验目标账号名合法性
+  if [[ ! "$target" =~ ^[a-zA-Z0-9_-]+$ ]] || [[ "$target" =~ ^(tmp|save|new|rm|delete|ls|list|status)$ ]]; then
+    echo "错误: 账号名格式不合法或为系统保留字"
+    echo "用法提示: cx-switch <账号名> 或 cx-switch --help"
+    return 1
+  fi
+
+  # 检查 Codex 进程
+  if pgrep -ix "codex" >/dev/null 2>&1; then
+    if [[ $force -eq 1 ]]; then
+      echo "警告: 检测到 Codex 正在运行，已通过 --force 强制执行"
+    else
+      echo "错误: 检测到 Codex 正在运行！请先彻底关闭 Codex (CLI / Desktop) 后再切换账号 (或使用 -f / --force 强制执行)。"
+      return 1
+    fi
+  fi
+
+  local target_auth="$dir/auth.${target}.json"
+
+  # 8. 原地刷新同步检查
+  if [[ "$target" == "$prev" ]]; then
+    if [[ -f "$auth" ]] && grep -qE '"(access_token|refresh_token|api_key|session_token)"' "$auth" 2>/dev/null; then
+      if (umask 077 && cp "$auth" "$target_auth.tmp" && mv "$target_auth.tmp" "$target_auth"); then
+        echo "已同步更新 [$target] 的最新凭据到本地备份"
+      else
+        echo "错误: 同步凭据失败"
+        return 1
+      fi
+    else
+      echo "提示: 当前已激活 [$target]，未发现需要更新的凭据"
+    fi
+    return 0
+  fi
+
+  # 9. 切换检查：目标账号必须预先存在（防止意外覆盖）
+  if [[ ! -f "$target_auth" ]]; then
+    echo "错误: 未找到账号 [$target] 的备份配置"
+    echo ""
+    echo "若要绑定当前登录的账号为 [$target]，请运行:"
+    echo "  cx-switch save $target"
+    echo ""
+    echo "若要切换至新账号，请运行:"
+    echo "  cx-switch new"
+    return 1
+  fi
+
+  # 10. 安全回存旧账号凭据（带有效性校验 + umask 077 + 原子替换）
+  if [[ -n "$prev" && -f "$auth" ]]; then
+    if grep -qE '"(access_token|refresh_token|api_key|session_token)"' "$auth" 2>/dev/null; then
+      if ! (umask 077 && cp "$auth" "$dir/auth.${prev}.json.tmp" && mv "$dir/auth.${prev}.json.tmp" "$dir/auth.${prev}.json"); then
+        echo "错误: 无法保存当前账号 [$prev] 的凭据，已中止切换"
+        return 1
+      fi
+      echo "已自动归档 [$prev] 的最新登录凭据"
+    else
+      echo "警告: 当前凭据为空或已失效，跳过对 [$prev] 备份的覆盖"
+    fi
+  fi
+
+  # 11. 载入目标账号
+  if ! (umask 077 && cp "$target_auth" "$auth.tmp" && mv "$auth.tmp" "$auth"); then
+    echo "错误: 切换至 [$target] 失败"
+    return 1
+  fi
+
+  (umask 077 && echo "$target" > "$current_tag.tmp" && mv "$current_tag.tmp" "$current_tag")
+  echo "已成功切换至 [$target]，现在可以启动 Codex 了"
+}
+
+# ------------------------------------------------------------------------------
+# 兼容直接执行 (Standalone CLI) 与 Source 引入 (Shell Function)
+# ------------------------------------------------------------------------------
+if [[ -n "$ZSH_VERSION" ]]; then
+  [[ "$ZSH_EVAL_CONTEXT" != *:file* ]] && cx-switch "$@"
+elif [[ -n "$BASH_VERSION" ]]; then
+  [[ "${BASH_SOURCE[0]}" == "$0" ]] && cx-switch "$@"
+fi
