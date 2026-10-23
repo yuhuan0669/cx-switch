@@ -5,7 +5,7 @@
 # License: MIT
 # ==============================================================================
 
-CX_VERSION="1.1.0"
+CX_VERSION="1.1.1"
 
 _get_account_details() {
   local auth_file="$1"
@@ -22,7 +22,6 @@ try:
     
     email = data.get("email") or ""
     plan = ""
-    name = data.get("name") or ""
 
     id_token = data.get("tokens", {}).get("id_token") or data.get("id_token")
     if id_token and isinstance(id_token, str):
@@ -32,7 +31,6 @@ try:
             p += "=" * (-len(p) % 4)
             claims = json.loads(base64.urlsafe_b64decode(p).decode("utf-8", errors="ignore"))
             email = claims.get("email") or claims.get("preferred_username") or email
-            name = claims.get("name") or name
             auth_info = claims.get("https://api.openai.com/auth", {})
             if isinstance(auth_info, dict):
                 plan = auth_info.get("chatgpt_plan_type") or ""
@@ -44,8 +42,6 @@ try:
     parts_out = []
     if email:
         parts_out.append(email)
-    if name and name != email:
-        parts_out.append(f"({name})")
     if plan:
         parts_out.append(f"[{plan}]")
 
@@ -110,28 +106,35 @@ cx-switch() {
     read -r prev < "$current_tag" 2>/dev/null
   fi
 
-  # 2. 版本查看
+  # 2. 版本查看 (-v, --version)
   if [[ "$action" == "-v" || "$action" == "--version" ]]; then
     echo "cx-switch v$CX_VERSION"
     return 0
   fi
 
-  # 3. 帮助与状态展示（无参数、-h、--help、list、ls、status）
-  if [[ -z "$action" || "$action" == "-h" || "$action" == "--help" || "$action" == "list" || "$action" == "ls" || "$action" == "status" ]]; then
+  # 3. 帮助手册 (-h, --help, help)
+  if [[ "$action" == "-h" || "$action" == "--help" || "$action" == "help" ]]; then
+    echo "用法:"
+    echo "  cx-switch                   查看当前登录与已保存账号"
+    echo "  cx-switch <账号名>          切换到指定账号 (若已在当前账号则自动同步刷新凭据)"
+    echo "  cx-switch save <账号名>     将当前活跃登录凭据另存/绑定为指定账号"
+    echo "  cx-switch new               安全封存当前账号并清空凭据，以便启动 Codex 登录新账号"
+    echo "  cx-switch rm <账号名>       删除指定的账号备份"
+    echo "  cx-switch -f, --force       强制切换 (跳过运行中的 Codex 进程检查)"
+    echo "  cx-switch -h, --help        显示帮助信息"
+    echo "  cx-switch -v, --version     显示版本信息"
+    return 0
+  fi
+
+  # 4. 默认查看状态（无参数、status、ls、list）
+  if [[ -z "$action" || "$action" == "status" || "$action" == "ls" || "$action" == "list" ]]; then
     local active_details=""
     if [[ -f "$auth" ]]; then
       active_details=$(_get_account_details "$auth")
     fi
 
-    echo "=== Codex 账号管理 (cx-switch v$CX_VERSION) ==="
-    echo "当前激活别名: ${prev:-[未设置别名]}"
-    if [[ -n "$active_details" ]]; then
-      echo "当前登录账号: $active_details"
-    else
-      echo "当前登录账号: [未登录 / 无有效凭据]"
-    fi
-    echo ""
-    echo "已保存的账号备份:"
+    echo "当前登录: ${active_details:-未登录}"
+    echo "已保存账号:"
 
     local found=0
     local restore_nullglob=""
@@ -144,6 +147,20 @@ cx-switch() {
     local files=("$dir"/auth.*.json)
     [[ -n "$restore_nullglob" ]] && shopt -u nullglob
 
+    if [[ ${#files[@]} -eq 0 ]]; then
+      echo "  (暂无保存)"
+      return 0
+    fi
+
+    # 动态计算别名列宽（默认至少 14 字符）
+    local max_w=14
+    for f in "${files[@]}"; do
+      [[ -e "$f" ]] || continue
+      local n="${f#$dir/auth.}"
+      n="${n%.json}"
+      [[ ${#n} -gt $max_w ]] && max_w=${#n}
+    done
+
     for f in "${files[@]}"; do
       [[ -e "$f" ]] || continue
       local acc_name="${f#$dir/auth.}"
@@ -151,30 +168,19 @@ cx-switch() {
       
       local acc_details=""
       acc_details=$(_get_account_details "$f")
-      local display_suffix=""
-      [[ -n "$acc_details" ]] && display_suffix=" -> $acc_details"
 
-      if [[ "$acc_name" == "$prev" ]]; then
-        echo "  * $acc_name$display_suffix (当前激活)"
-      else
-        echo "    $acc_name$display_suffix"
-      fi
+      local marker=" "
+      [[ "$acc_name" == "$prev" ]] && marker="*"
+
+      printf "  %s %-${max_w}s %s\n" "$marker" "$acc_name" "$acc_details"
       found=1
     done
 
-    [[ $found -eq 0 ]] && echo "  (暂无账号备份)"
-
-    echo ""
-    echo "常用指令:"
-    echo "  cx-switch <账号名>          切换到指定账号 (若已在当前账号则自动同步刷新凭据)"
-    echo "  cx-switch save <账号名>     将当前活跃登录凭据另存/绑定为指定账号"
-    echo "  cx-switch new               安全封存当前账号并清空凭据，以便启动 Codex 登录新账号"
-    echo "  cx-switch rm <账号名>       删除指定的账号备份"
-    echo "  cx-switch status            查看当前账号与所有备份状态"
+    [[ $found -eq 0 ]] && echo "  (暂无保存)"
     return 0
   fi
 
-  # 4. 子命令：清空当前凭据准备登录新账号 (cx-switch new)
+  # 5. 子命令：清空当前凭据准备登录新账号 (cx-switch new)
   if [[ "$action" == "new" ]]; then
     if pgrep -ix "codex" >/dev/null 2>&1; then
       if [[ $force -eq 1 ]]; then
@@ -200,14 +206,14 @@ cx-switch() {
     return 0
   fi
 
-  # 5. 子命令：显式绑定/另存当前凭据 (cx-switch save <name>)
+  # 6. 子命令：显式绑定/另存当前凭据 (cx-switch save <name>)
   if [[ "$action" == "save" ]]; then
     local save_name="${args[1]}"
     if [[ -z "$save_name" ]]; then
       echo "错误: 请指定要保存的账号名称。例如: cx-switch save work"
       return 1
     fi
-    if [[ ! "$save_name" =~ ^[a-zA-Z0-9_-]+$ ]] || [[ "$save_name" =~ ^(tmp|save|new|rm|delete|ls|list|status)$ ]]; then
+    if [[ ! "$save_name" =~ ^[a-zA-Z0-9_-]+$ ]] || [[ "$save_name" =~ ^(tmp|save|new|rm|delete|ls|list|status|help)$ ]]; then
       echo "错误: 账号名只能包含英文字母、数字、下划线和连字符，且不能使用系统保留字"
       return 1
     fi
@@ -226,11 +232,11 @@ cx-switch() {
     
     local saved_details
     saved_details=$(_get_account_details "$dir/auth.${save_name}.json")
-    echo "已将当前登录凭据成功保存为 [$save_name]${saved_details:+ ($saved_details)}，并标记为当前激活账号"
+    echo "已将当前登录凭据保存为 [$save_name]${saved_details:+ ($saved_details)}"
     return 0
   fi
 
-  # 6. 子命令：删除账号备份 (cx-switch rm <name> / cx-switch delete <name>)
+  # 7. 子命令：删除账号备份 (cx-switch rm <name> / cx-switch delete <name>)
   if [[ "$action" == "rm" || "$action" == "delete" ]]; then
     local del_name="${args[1]}"
     if [[ -z "$del_name" ]]; then
@@ -252,11 +258,11 @@ cx-switch() {
     return 0
   fi
 
-  # 7. 账号切换逻辑 (cx-switch <target>)
+  # 8. 账号切换逻辑 (cx-switch <target>)
   local target="$action"
 
   # 校验目标账号名合法性
-  if [[ ! "$target" =~ ^[a-zA-Z0-9_-]+$ ]] || [[ "$target" =~ ^(tmp|save|new|rm|delete|ls|list|status)$ ]]; then
+  if [[ ! "$target" =~ ^[a-zA-Z0-9_-]+$ ]] || [[ "$target" =~ ^(tmp|save|new|rm|delete|ls|list|status|help)$ ]]; then
     echo "错误: 账号名格式不合法或为系统保留字"
     echo "用法提示: cx-switch <账号名> 或 cx-switch --help"
     return 1
@@ -274,7 +280,7 @@ cx-switch() {
 
   local target_auth="$dir/auth.${target}.json"
 
-  # 8. 原地刷新同步检查
+  # 9. 原地刷新同步检查
   if [[ "$target" == "$prev" ]]; then
     if [[ -f "$auth" ]] && grep -qE '"(access_token|refresh_token|api_key|session_token)"' "$auth" 2>/dev/null; then
       if (umask 077 && cp "$auth" "$target_auth.tmp" && mv "$target_auth.tmp" "$target_auth"); then
@@ -291,19 +297,14 @@ cx-switch() {
     return 0
   fi
 
-  # 9. 切换检查：目标账号必须预先存在（防止意外覆盖）
+  # 10. 切换检查：目标账号必须预先存在（防止意外覆盖）
   if [[ ! -f "$target_auth" ]]; then
     echo "错误: 未找到账号 [$target] 的备份配置"
-    echo ""
-    echo "若要绑定当前登录的账号为 [$target]，请运行:"
-    echo "  cx-switch save $target"
-    echo ""
-    echo "若要切换至新账号，请运行:"
-    echo "  cx-switch new"
+    echo "若要将当前登录绑定为 [$target]，请运行: cx-switch save $target"
     return 1
   fi
 
-  # 10. 安全回存旧账号凭据（带有效性校验 + umask 077 + 原子替换）
+  # 11. 安全回存旧账号凭据（带有效性校验 + umask 077 + 原子替换）
   if [[ -n "$prev" && -f "$auth" ]]; then
     if grep -qE '"(access_token|refresh_token|api_key|session_token)"' "$auth" 2>/dev/null; then
       if ! (umask 077 && cp "$auth" "$dir/auth.${prev}.json.tmp" && mv "$dir/auth.${prev}.json.tmp" "$dir/auth.${prev}.json"); then
@@ -318,7 +319,7 @@ cx-switch() {
     fi
   fi
 
-  # 11. 载入目标账号
+  # 12. 载入目标账号
   if ! (umask 077 && cp "$target_auth" "$auth.tmp" && mv "$auth.tmp" "$auth"); then
     echo "错误: 切换至 [$target] 失败"
     return 1

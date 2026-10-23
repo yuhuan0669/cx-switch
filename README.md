@@ -96,26 +96,14 @@ cx-switch personal
 
 ```bash
 cx-switch
-# 或
-cx-switch status
 ```
 
 输出示例：
 ```text
-=== Codex 账号管理 (cx-switch v1.1.0) ===
-当前激活别名: work
-当前登录账号: work.user@company.com (John Doe) [plus]
-
-已保存的账号备份:
-    personal -> personal.user@gmail.com [free]
-  * work     -> work.user@company.com (John Doe) [plus] (当前激活)
-
-常用指令:
-  cx-switch <账号名>          切换到指定账号 (若已在当前账号则自动同步刷新凭据)
-  cx-switch save <账号名>     将当前活跃登录凭据另存/绑定为指定账号
-  cx-switch new               安全封存当前账号并清空凭据，以便启动 Codex 登录新账号
-  cx-switch rm <账号名>       删除指定的账号备份
-  cx-switch status            查看当前账号与所有备份状态
+当前登录: work.user@company.com [plus]
+已保存账号:
+    personal       personal.user@gmail.com [free]
+  * work           work.user@company.com [plus]
 ```
 
 ---

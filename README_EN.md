@@ -94,26 +94,14 @@ cx-switch personal
 
 ```bash
 cx-switch
-# or
-cx-switch status
 ```
 
 Example Output:
 ```text
-=== Codex Account Manager (cx-switch v1.1.0) ===
-Current active alias: work
-Current logged-in account: work.user@company.com (John Doe) [plus]
-
-Saved account backups:
-    personal -> personal.user@gmail.com [free]
-  * work     -> work.user@company.com (John Doe) [plus] (current active)
-
-Commands:
-  cx-switch <account_name>     Switch to specified account (syncs tokens if already active)
-  cx-switch save <account_name> Save current credentials as specified account
-  cx-switch new                Safely archive current account and clear session for new login
-  cx-switch rm <account_name>  Remove specified account backup
-  cx-switch status             Display current status and list of backups
+当前登录: work.user@company.com [plus]
+已保存账号:
+    personal       personal.user@gmail.com [free]
+  * work           work.user@company.com [plus]
 ```
 
 ---
