@@ -5,7 +5,7 @@
 # License: MIT
 # ==============================================================================
 
-CX_VERSION="1.1.1"
+CX_VERSION="1.1.2"
 
 _get_account_details() {
   local auth_file="$1"
@@ -268,19 +268,9 @@ cx-switch() {
     return 1
   fi
 
-  # 检查 Codex 进程
-  if pgrep -ix "codex" >/dev/null 2>&1; then
-    if [[ $force -eq 1 ]]; then
-      echo "警告: 检测到 Codex 正在运行，已通过 --force 强制执行"
-    else
-      echo "错误: 检测到 Codex 正在运行！请先彻底关闭 Codex (CLI / Desktop) 后再切换账号 (或使用 -f / --force 强制执行)。"
-      return 1
-    fi
-  fi
-
   local target_auth="$dir/auth.${target}.json"
 
-  # 9. 原地刷新同步检查
+  # 9. 原地刷新同步检查 (当前账号仅做凭据单向归档，不修改 auth.json，允许 Codex 运行中执行)
   if [[ "$target" == "$prev" ]]; then
     if [[ -f "$auth" ]] && grep -qE '"(access_token|refresh_token|api_key|session_token)"' "$auth" 2>/dev/null; then
       if (umask 077 && cp "$auth" "$target_auth.tmp" && mv "$target_auth.tmp" "$target_auth"); then
@@ -295,6 +285,16 @@ cx-switch() {
       echo "提示: 当前已激活 [$target]，未发现需要更新的凭据"
     fi
     return 0
+  fi
+
+  # 10. 检查 Codex 进程 (仅跨账号切换才需要确保关闭 Codex，防止文件热替换冲突)
+  if pgrep -ix "codex" >/dev/null 2>&1; then
+    if [[ $force -eq 1 ]]; then
+      echo "警告: 检测到 Codex 正在运行，已通过 --force 强制执行"
+    else
+      echo "错误: 检测到 Codex 正在运行！请先彻底关闭 Codex (CLI / Desktop) 后再切换账号 (或使用 -f / --force 强制执行)。"
+      return 1
+    fi
   fi
 
   # 10. 切换检查：目标账号必须预先存在（防止意外覆盖）
