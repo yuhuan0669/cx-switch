@@ -4,6 +4,10 @@
 > 
 > 针对 OpenAI Codex CLI 与 Desktop 设计的安全、无感多账号切换工具，原生兼容 macOS / Linux 上的 Bash 与 Zsh。
 
+<p align="left">
+  <a href="README_EN.md">English</a> | <b>简体中文</b>
+</p>
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux-lightgrey.svg)]()
 [![Shell](https://img.shields.io/badge/Shell-Bash%20%7C%20Zsh-4EAA25.svg)]()
