@@ -15,6 +15,7 @@
 ## 🌟 Features
 
 - 💡 **Simple & Risk-Free**: No complicated setups or black-box hooks that trip risk detections. Just clean, transparent local file management.
+- 🔍 **Identity & Email Inspection**: Automatically parses internal JWT tokens to display the actual email address, display name, and subscription tier (e.g., prolite/plus/team) alongside the account alias.
 - 🔒 **Zero Credential Pollution**: Strictly separates "switching existing accounts" from "binding new accounts (`save`)", eliminating the critical flaw where logging into a new session silently overwrites the previous account's backup.
 - 🛡️ **Production-Grade Security**: Enforces `umask 077` (read/write only by the current user) on all credential backups and tag files, preventing multi-user privilege leakage.
 - ⚡ **Atomic Replacement**: Utilizes `.tmp` staging + `mv` atomic replacement within the same filesystem, ensuring zero file corruption during power failures or sudden process termination.
@@ -99,12 +100,13 @@ cx-switch status
 
 Example Output:
 ```text
-=== Codex Account Manager (cx-switch v1.0.0) ===
-Current active account: work
+=== Codex Account Manager (cx-switch v1.1.0) ===
+Current active alias: work
+Current logged-in account: work.user@company.com (John Doe) [plus]
 
 Saved account backups:
-    personal
-  * work (current active)
+    personal -> personal.user@gmail.com [free]
+  * work     -> work.user@company.com (John Doe) [plus] (current active)
 
 Commands:
   cx-switch <account_name>     Switch to specified account (syncs tokens if already active)

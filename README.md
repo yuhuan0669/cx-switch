@@ -17,6 +17,7 @@
 ## 🌟 特性亮点 (Features)
 
 - 💡 **拒绝黑盒，零风控隐患**：摒弃复杂难用与风控隐患，纯靠本地原生文件管理，开箱即用、代码全透明。
+- 🔍 **账号邮箱与身份透视**：自动解析凭据内部 JWT Token，不仅展示自定义别名，还直观呈现实际绑定的真实邮箱、昵称及订阅计划（如 prolite/plus/team），告别账号盲切。
 - 🔒 **杜绝凭据污染**：严格区分“切换已有账号”与“绑定新账号”，杜绝因重复登录导致旧账号凭据被静默覆盖的经典陷阱。
 - 🛡️ **生产级安全防御**：所有凭据写入均强制 `umask 077`（仅当前用户只读只写），杜绝系统多用户嗅探敏感 Token。
 - ⚡ **原子替换 (Atomic Swap)**：采用 `.tmp` + `mv` 同分区重命名，保证断电或异常中止时凭据不损坏。
@@ -101,12 +102,13 @@ cx-switch status
 
 输出示例：
 ```text
-=== Codex 账号管理 (cx-switch v1.0.0) ===
-当前激活账号: work
+=== Codex 账号管理 (cx-switch v1.1.0) ===
+当前激活别名: work
+当前登录账号: work.user@company.com (John Doe) [plus]
 
 已保存的账号备份:
-    personal
-  * work (当前激活)
+    personal -> personal.user@gmail.com [free]
+  * work     -> work.user@company.com (John Doe) [plus] (当前激活)
 
 常用指令:
   cx-switch <账号名>          切换到指定账号 (若已在当前账号则自动同步刷新凭据)

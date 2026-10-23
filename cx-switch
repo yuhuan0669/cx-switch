@@ -5,7 +5,81 @@
 # License: MIT
 # ==============================================================================
 
-CX_VERSION="1.0.0"
+CX_VERSION="1.1.0"
+
+_get_account_details() {
+  local auth_file="$1"
+  [[ -f "$auth_file" ]] || return 1
+
+  # 1. 优先使用 Python3 解析 JWT 与 JSON (最精准、兼容性最好)
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c '
+import json, base64, sys
+
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as f:
+        data = json.load(f)
+    
+    email = data.get("email") or ""
+    plan = ""
+    name = data.get("name") or ""
+
+    id_token = data.get("tokens", {}).get("id_token") or data.get("id_token")
+    if id_token and isinstance(id_token, str):
+        parts = id_token.split(".")
+        if len(parts) >= 2:
+            p = parts[1]
+            p += "=" * (-len(p) % 4)
+            claims = json.loads(base64.urlsafe_b64decode(p).decode("utf-8", errors="ignore"))
+            email = claims.get("email") or claims.get("preferred_username") or email
+            name = claims.get("name") or name
+            auth_info = claims.get("https://api.openai.com/auth", {})
+            if isinstance(auth_info, dict):
+                plan = auth_info.get("chatgpt_plan_type") or ""
+
+    if not email and data.get("OPENAI_API_KEY"):
+        k = data["OPENAI_API_KEY"]
+        email = f"API-Key ({k[:7]}...{k[-4:]})" if len(k) > 12 else "API-Key"
+
+    parts_out = []
+    if email:
+        parts_out.append(email)
+    if name and name != email:
+        parts_out.append(f"({name})")
+    if plan:
+        parts_out.append(f"[{plan}]")
+
+    if parts_out:
+        print(" ".join(parts_out))
+        sys.exit(0)
+except Exception:
+    pass
+sys.exit(1)
+' "$auth_file" 2>/dev/null && return 0
+  fi
+
+  # 2. 纯 Shell 回退解析 (无 Python 环境时，利用 base64 与 grep 提取 email)
+  local id_token
+  id_token=$(grep -oE '"id_token"[[:space:]]*:[[:space:]]*"[^"]+"' "$auth_file" 2>/dev/null | head -1 | sed 's/.*"id_token"[[:space:]]*:[[:space:]]*"//; s/".*//')
+  if [[ -n "$id_token" ]]; then
+    local payload
+    payload=$(echo "$id_token" | cut -d. -f2 | tr '_-' '/+')
+    local pad=$(( (4 - ${#payload} % 4) % 4 ))
+    [[ $pad -eq 1 ]] && payload="${payload}="
+    [[ $pad -eq 2 ]] && payload="${payload}=="
+    [[ $pad -eq 3 ]] && payload="${payload}==="
+    local decoded
+    decoded=$(echo "$payload" | base64 -d 2>/dev/null || echo "$payload" | base64 -D 2>/dev/null)
+    local email
+    email=$(echo "$decoded" | grep -oE '"email"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 | sed 's/.*"email"[[:space:]]*:[[:space:]]*"//; s/".*//')
+    if [[ -n "$email" ]]; then
+      echo "$email"
+      return 0
+    fi
+  fi
+
+  return 1
+}
 
 cx-switch() {
   local dir="${CODEX_HOME:-$HOME/.codex}"
@@ -44,8 +118,18 @@ cx-switch() {
 
   # 3. 帮助与状态展示（无参数、-h、--help、list、ls、status）
   if [[ -z "$action" || "$action" == "-h" || "$action" == "--help" || "$action" == "list" || "$action" == "ls" || "$action" == "status" ]]; then
+    local active_details=""
+    if [[ -f "$auth" ]]; then
+      active_details=$(_get_account_details "$auth")
+    fi
+
     echo "=== Codex 账号管理 (cx-switch v$CX_VERSION) ==="
-    echo "当前激活账号: ${prev:-[未标记 / 未知]}"
+    echo "当前激活别名: ${prev:-[未设置别名]}"
+    if [[ -n "$active_details" ]]; then
+      echo "当前登录账号: $active_details"
+    else
+      echo "当前登录账号: [未登录 / 无有效凭据]"
+    fi
     echo ""
     echo "已保存的账号备份:"
 
@@ -64,10 +148,16 @@ cx-switch() {
       [[ -e "$f" ]] || continue
       local acc_name="${f#$dir/auth.}"
       acc_name="${acc_name%.json}"
+      
+      local acc_details=""
+      acc_details=$(_get_account_details "$f")
+      local display_suffix=""
+      [[ -n "$acc_details" ]] && display_suffix=" -> $acc_details"
+
       if [[ "$acc_name" == "$prev" ]]; then
-        echo "  * $acc_name (当前激活)"
+        echo "  * $acc_name$display_suffix (当前激活)"
       else
-        echo "    $acc_name"
+        echo "    $acc_name$display_suffix"
       fi
       found=1
     done
@@ -98,7 +188,9 @@ cx-switch() {
     # 若当前有活跃有效凭据，先安全归档
     if [[ -n "$prev" && -f "$auth" ]] && grep -qE '"(access_token|refresh_token|api_key|session_token)"' "$auth" 2>/dev/null; then
       if (umask 077 && cp "$auth" "$dir/auth.${prev}.json.tmp" && mv "$dir/auth.${prev}.json.tmp" "$dir/auth.${prev}.json"); then
-        echo "已自动保存 [$prev] 的最新凭据备份"
+        local prev_info
+        prev_info=$(_get_account_details "$dir/auth.${prev}.json")
+        echo "已自动保存 [$prev]${prev_info:+ ($prev_info)} 的最新凭据备份"
       fi
     fi
 
@@ -131,7 +223,10 @@ cx-switch() {
     fi
 
     (umask 077 && echo "$save_name" > "$current_tag.tmp" && mv "$current_tag.tmp" "$current_tag")
-    echo "已将当前登录凭据成功保存为 [$save_name]，并标记为当前激活账号"
+    
+    local saved_details
+    saved_details=$(_get_account_details "$dir/auth.${save_name}.json")
+    echo "已将当前登录凭据成功保存为 [$save_name]${saved_details:+ ($saved_details)}，并标记为当前激活账号"
     return 0
   fi
 
@@ -183,7 +278,9 @@ cx-switch() {
   if [[ "$target" == "$prev" ]]; then
     if [[ -f "$auth" ]] && grep -qE '"(access_token|refresh_token|api_key|session_token)"' "$auth" 2>/dev/null; then
       if (umask 077 && cp "$auth" "$target_auth.tmp" && mv "$target_auth.tmp" "$target_auth"); then
-        echo "已同步更新 [$target] 的最新凭据到本地备份"
+        local sync_details
+        sync_details=$(_get_account_details "$target_auth")
+        echo "已同步更新 [$target]${sync_details:+ ($sync_details)} 的最新凭据到本地备份"
       else
         echo "错误: 同步凭据失败"
         return 1
@@ -213,7 +310,9 @@ cx-switch() {
         echo "错误: 无法保存当前账号 [$prev] 的凭据，已中止切换"
         return 1
       fi
-      echo "已自动归档 [$prev] 的最新登录凭据"
+      local prev_info
+      prev_info=$(_get_account_details "$dir/auth.${prev}.json")
+      echo "已自动归档 [$prev]${prev_info:+ ($prev_info)} 的最新登录凭据"
     else
       echo "警告: 当前凭据为空或已失效，跳过对 [$prev] 备份的覆盖"
     fi
@@ -226,7 +325,10 @@ cx-switch() {
   fi
 
   (umask 077 && echo "$target" > "$current_tag.tmp" && mv "$current_tag.tmp" "$current_tag")
-  echo "已成功切换至 [$target]，现在可以启动 Codex 了"
+  
+  local target_details
+  target_details=$(_get_account_details "$auth")
+  echo "已成功切换至 [$target]${target_details:+ ($target_details)}，现在可以启动 Codex 了"
 }
 
 # ------------------------------------------------------------------------------
